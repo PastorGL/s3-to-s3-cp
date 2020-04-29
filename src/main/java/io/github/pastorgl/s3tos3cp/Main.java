@@ -6,15 +6,16 @@ import com.amazonaws.auth.AWSStaticCredentialsProvider;
 import com.amazonaws.auth.BasicAWSCredentials;
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.AmazonS3ClientBuilder;
-import com.amazonaws.services.s3.model.ListObjectsRequest;
-import com.amazonaws.services.s3.model.S3Object;
-import com.amazonaws.services.s3.model.S3ObjectInputStream;
-import com.amazonaws.services.s3.model.S3ObjectSummary;
+import com.amazonaws.services.s3.model.*;
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.DefaultParser;
+import org.apache.commons.cli.HelpFormatter;
 import org.apache.commons.cli.Options;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -31,6 +32,7 @@ public class Main {
         OPTIONS.addOption("A", "accessTo", true, "s3 access key to copy objects to");
         OPTIONS.addOption("s", "secretFrom", true, "s3 secret key to copy objects from");
         OPTIONS.addOption("S", "secretTo", true, "s3 secret key to copy objects to");
+        OPTIONS.addOption("v", "verbose", false, "show some stats");
     }
 
     public static void main(String[] args) throws Exception {
@@ -42,7 +44,7 @@ public class Main {
 
         Matcher m = PATTERN.matcher(from);
         if (!m.matches()) {
-            System.exit(-5);
+            helpAndExit(5);
         }
 
         String bucketFrom = m.group(1);
@@ -55,7 +57,7 @@ public class Main {
         if (accessFrom != null) {
             String secretFrom = cmd.getOptionValue("s", null);
             if (secretFrom == null) {
-                System.exit(-4);
+                helpAndExit(4);
             }
             fromBuilder.setCredentials(new AWSStaticCredentialsProvider(new BasicAWSCredentials(accessFrom, secretFrom)));
         }
@@ -68,7 +70,7 @@ public class Main {
 
         m = PATTERN.matcher(to);
         if (!m.matches()) {
-            System.exit(-6);
+            helpAndExit(6);
         }
         String bucketTo = m.group(1);
         String keyPrefixTo = m.group(2);
@@ -80,24 +82,43 @@ public class Main {
         if (accessTo != null) {
             String secretTo = cmd.getOptionValue("S", null);
             if (secretTo == null) {
-                System.exit(-3);
+                helpAndExit(3);
             }
             toBuilder.setCredentials(new AWSStaticCredentialsProvider(new BasicAWSCredentials(accessTo, secretTo)));
         }
         AmazonS3 s3to = toBuilder.build();
 
 
-        s3from.listObjects(request).getObjectSummaries().stream()
+        ObjectListing objectListing = s3from.listObjects(request);
+        List<S3ObjectSummary> objectSummaries = new ArrayList<>(objectListing.getObjectSummaries());
+        while (objectListing.isTruncated()) {
+            objectListing = s3from.listNextBatchOfObjects(objectListing);
+            objectSummaries.addAll(objectListing.getObjectSummaries());
+        }
+
+        boolean verbose = cmd.hasOption("v");
+        long ts0 = new Date().getTime();
+        long total = 0L;
+        if (verbose) {
+            total = objectSummaries.stream().map(S3ObjectSummary::getSize).reduce(Long::sum).get();
+            System.out.println(from + " -> " + to + ": " + objectSummaries.size() + " object(s), " + total + " byte(s)");
+        }
+
+        objectSummaries.stream()
                 .map(S3ObjectSummary::getKey).parallel()
-                .forEach(k -> {
+                .forEach(keyFrom -> {
                     try {
-                        S3Object s3object = s3from.getObject(bucketFrom, k);
+                        S3Object s3object = s3from.getObject(bucketFrom, keyFrom);
                         long size = s3object.getObjectMetadata().getContentLength();
+                        String keyTo = keyPrefixTo + "/" + keyFrom;
+
+                        if (verbose) {
+                            System.out.println(keyFrom + " -> " + keyTo + ": " + size + " byte(s)");
+                        }
 
                         if (size > 0L) {
                             S3ObjectInputStream in = s3object.getObjectContent();
-
-                            StreamTransferManager stm = new StreamTransferManager(bucketTo, keyPrefixTo + "/" + k, s3to);
+                            StreamTransferManager stm = new StreamTransferManager(bucketTo, keyTo, s3to);
 
                             MultiPartOutputStream out = stm.numStreams(1)
                                     .numUploadThreads(1)
@@ -120,10 +141,21 @@ public class Main {
                             out.close();
                             stm.complete();
                         } else {
-                            s3to.putObject(bucketTo, keyPrefixTo + "/" + k, "");
+                            s3to.putObject(bucketTo, keyTo, "");
                         }
-                    } catch (IOException ignored) {
+                    } catch (IOException e) {
+                        System.err.println(e.getMessage());
                     }
                 });
+
+        if (verbose) {
+            double time = (new Date().getTime() - ts0) / 1000.D;
+            System.out.println(time + " second(s), ~" + (total / 1024 / 1024 / time) + " MB/sec");
+        }
+    }
+
+    private static void helpAndExit(int code) {
+        new HelpFormatter().printHelp("s3 to s3 copy utility", OPTIONS);
+        System.exit(-code);
     }
 }
