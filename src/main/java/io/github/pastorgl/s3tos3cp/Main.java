@@ -7,10 +7,7 @@ import com.amazonaws.auth.BasicAWSCredentials;
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.AmazonS3ClientBuilder;
 import com.amazonaws.services.s3.model.*;
-import org.apache.commons.cli.CommandLine;
-import org.apache.commons.cli.DefaultParser;
-import org.apache.commons.cli.HelpFormatter;
-import org.apache.commons.cli.Options;
+import org.apache.commons.cli.*;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -26,17 +23,22 @@ public class Main {
     private static int _15MB = 15 * 1024 * 1024;
 
     static {
-        OPTIONS.addRequiredOption("k", "prefixFrom", true, "s3 key prefix to copy objects from");
-        OPTIONS.addRequiredOption("K", "prefixTo", true, "s3 key prefix to copy objects to");
-        OPTIONS.addOption("a", "accessFrom", true, "s3 access key to copy objects from");
-        OPTIONS.addOption("A", "accessTo", true, "s3 access key to copy objects to");
-        OPTIONS.addOption("s", "secretFrom", true, "s3 secret key to copy objects from");
-        OPTIONS.addOption("S", "secretTo", true, "s3 secret key to copy objects to");
-        OPTIONS.addOption("v", "verbose", false, "show some stats");
+        OPTIONS.addRequiredOption("k", "prefixFrom", true, "S3 key prefix to source (s3://source-bucket/path/from)");
+        OPTIONS.addRequiredOption("K", "prefixTo", true, "S3 key prefix to destination (s3://dest-bucket/path/to)");
+        OPTIONS.addOption("a", "accessFrom", true, "AWS access key for source bucket");
+        OPTIONS.addOption("A", "accessTo", true, "AWS access key for destination bucket");
+        OPTIONS.addOption("s", "secretFrom", true, "AWS secret key for source bucket");
+        OPTIONS.addOption("S", "secretTo", true, "AWS secret key for destination bucket");
+        OPTIONS.addOption("v", "verbose", false, "Show some stats during copy process");
     }
 
-    public static void main(String[] args) throws Exception {
-        CommandLine cmd = new DefaultParser().parse(OPTIONS, args);
+    public static void main(String[] args) {
+        CommandLine cmd = null;
+        try {
+            cmd = new DefaultParser().parse(OPTIONS, args);
+        } catch (ParseException pe) {
+            helpAndExit(6);
+        }
 
         String from = cmd.getOptionValue("k");
         String to = cmd.getOptionValue("K");
@@ -155,7 +157,7 @@ public class Main {
     }
 
     private static void helpAndExit(int code) {
-        new HelpFormatter().printHelp("s3 to s3 copy utility", OPTIONS);
+        new HelpFormatter().printHelp("S3 to S3 copy utility", OPTIONS);
         System.exit(-code);
     }
 }
