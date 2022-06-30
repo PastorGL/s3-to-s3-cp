@@ -29,6 +29,8 @@ public class Main {
         OPTIONS.addOption("A", "accessTo", true, "AWS access key for destination bucket");
         OPTIONS.addOption("s", "secretFrom", true, "AWS secret key for source bucket");
         OPTIONS.addOption("S", "secretTo", true, "AWS secret key for destination bucket");
+        OPTIONS.addOption("p", "paidFrom", false, "Set to pay for access to source");
+        OPTIONS.addOption("P", "paidTo", false, "Set to pay for access to destination");
         OPTIONS.addOption("v", "verbose", false, "Show some stats during copy process");
     }
 
@@ -52,6 +54,8 @@ public class Main {
         String bucketFrom = m.group(1);
         String keyPrefixFrom = m.group(2);
 
+        boolean paidFrom = cmd.hasOption("p");
+
 
         AmazonS3ClientBuilder fromBuilder = AmazonS3ClientBuilder.standard()
                 .enableForceGlobalBucketAccess();
@@ -68,6 +72,7 @@ public class Main {
         ListObjectsRequest request = new ListObjectsRequest();
         request.setBucketName(bucketFrom);
         request.setPrefix(keyPrefixFrom);
+        request.setRequesterPays(paidFrom);
 
 
         m = PATTERN.matcher(to);
@@ -106,11 +111,13 @@ public class Main {
             System.out.println(from + " -> " + to + ": " + objectSummaries.size() + " object(s), " + total + " byte(s)");
         }
 
+
+        boolean paidTo = cmd.hasOption("P");
         objectSummaries.stream()
                 .map(S3ObjectSummary::getKey).parallel()
                 .forEach(keyFrom -> {
                     try {
-                        S3Object s3object = s3from.getObject(bucketFrom, keyFrom);
+                        S3Object s3object = s3from.getObject(new GetObjectRequest(bucketFrom, keyFrom, paidFrom));
                         long size = s3object.getObjectMetadata().getContentLength();
                         String keyTo = keyPrefixTo + "/" + keyFrom;
 
@@ -120,7 +127,7 @@ public class Main {
 
                         if (size > 0L) {
                             S3ObjectInputStream in = s3object.getObjectContent();
-                            StreamTransferManager stm = new StreamTransferManager(bucketTo, keyTo, s3to);
+                            StreamTransferManager stm = new PaidStreamTransferManager(bucketTo, keyTo, s3to, paidTo);
 
                             MultiPartOutputStream out = stm.numStreams(1)
                                     .numUploadThreads(1)
@@ -159,5 +166,34 @@ public class Main {
     private static void helpAndExit(int code) {
         new HelpFormatter().printHelp("S3 to S3 copy utility", OPTIONS);
         System.exit(-code);
+    }
+
+    private static class PaidStreamTransferManager extends StreamTransferManager {
+        private final boolean paidTo;
+
+        public PaidStreamTransferManager(String bucketTo, String keyTo, AmazonS3 s3to, boolean paidTo) {
+            super(bucketTo, keyTo, s3to);
+            this.paidTo = paidTo;
+        }
+
+        @Override
+        public void customiseInitiateRequest(InitiateMultipartUploadRequest request) {
+            request.setRequesterPays(paidTo);
+        }
+
+        @Override
+        public void customiseUploadPartRequest(UploadPartRequest request) {
+            request.setRequesterPays(paidTo);
+        }
+
+        @Override
+        public void customiseCompleteRequest(CompleteMultipartUploadRequest request) {
+            request.setRequesterPays(paidTo);
+        }
+
+        @Override
+        public void customisePutEmptyObjectRequest(PutObjectRequest request) {
+            request.setRequesterPays(paidTo);
+        }
     }
 }
