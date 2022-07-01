@@ -111,7 +111,7 @@ public class Main {
             System.out.println(from + " -> " + to + ": " + objectSummaries.size() + " object(s), " + total + " byte(s)");
         }
 
-
+        int keyPrefixFromLen = keyPrefixFrom.length();
         boolean paidTo = cmd.hasOption("P");
         objectSummaries.stream()
                 .map(S3ObjectSummary::getKey).parallel()
@@ -119,7 +119,7 @@ public class Main {
                     try {
                         S3Object s3object = s3from.getObject(new GetObjectRequest(bucketFrom, keyFrom, paidFrom));
                         long size = s3object.getObjectMetadata().getContentLength();
-                        String keyTo = keyPrefixTo + "/" + keyFrom;
+                        String keyTo = keyPrefixTo + keyFrom.substring(keyPrefixFromLen);
 
                         if (verbose) {
                             System.out.println(keyFrom + " -> " + keyTo + ": " + size + " byte(s)");
